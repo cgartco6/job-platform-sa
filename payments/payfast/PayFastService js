@@ -1,0 +1,407 @@
+const axios = require('axios');
+const crypto = require('crypto');
+const querystring = require('querystring');
+
+class PayFastService {
+  constructor() {
+    this.config = {
+      merchantId: process.env.PAYFAST_MERCHANT_ID,
+      merchantKey: process.env.PAYFAST_MERCHANT_KEY,
+      passPhrase: process.env.PAYFAST_PASSPHRASE,
+      env: process.env.NODE_ENV === 'production' ? 'production' : 'sandbox',
+      returnUrl: `${process.env.BASE_URL}/payment/success`,
+      cancelUrl: `${process.env.BASE_URL}/payment/cancel`,
+      notifyUrl: `${process.env.BASE_URL}/api/payment/payfast/notify`,
+      validateUrl: 'https://www.payfast.co.za/eng/query/validate'
+    };
+    
+    this.baseUrl = this.config.env === 'production' 
+      ? 'https://www.payfast.co.za/eng/process' 
+      : 'https://sandbox.payfast.co.za/eng/process';
+  }
+
+  generatePaymentData(applicant, amount = 500, customData = {}) {
+    const paymentData = {
+      merchant_id: this.config.merchantId,
+      merchant_key: this.config.merchantKey,
+      return_url: this.config.returnUrl,
+      cancel_url: this.config.cancelUrl,
+      notify_url: this.config.notifyUrl,
+      
+      // Buyer details
+      name_first: applicant.personalInfo.firstName,
+      name_last: applicant.personalInfo.lastName,
+      email_address: applicant.personalInfo.email,
+      cell_number: applicant.personalInfo.phone,
+      
+      // Transaction details
+      m_payment_id: `JOBAPP-${applicant.applicantId}-${Date.now()}`,
+      amount: amount.toFixed(2),
+      item_name: 'AI Job Application Service - 30 Days',
+      item_description: 'AI CV enhancement, job matching, and auto-application service',
+      
+      // Custom data
+      custom_str1: applicant.applicantId,
+      custom_str2: JSON.stringify(customData),
+      custom_str3: applicant.personalInfo.idNumber || '',
+      custom_str4: 'jobai_sa_v1',
+      
+      // Subscription if needed
+      subscription_type: 0, // 0 = once off
+      frequency: 0,
+      cycles: 0,
+      
+      // Security
+      signature: null
+    };
+    
+    // Remove empty values
+    Object.keys(paymentData).forEach(key => {
+      if (paymentData[key] === null || paymentData[key] === undefined || paymentData[key] === '') {
+        delete paymentData[key];
+      }
+    });
+    
+    // Generate signature
+    paymentData.signature = this.generateSignature(paymentData);
+    
+    return paymentData;
+  }
+
+  generateSignature(data) {
+    // Create parameter string
+    let pfOutput = '';
+    
+    // Sort keys alphabetically
+    Object.keys(data)
+      .sort()
+      .forEach(key => {
+        if (data[key] !== '' && key !== 'signature') {
+          pfOutput += `${key}=${encodeURIComponent(data[key].toString().trim()).replace(/%20/g, '+')}&`;
+        }
+      });
+    
+    // Remove last ampersand
+    pfOutput = pfOutput.slice(0, -1);
+    
+    // Add passphrase if exists
+    if (this.config.passPhrase) {
+      pfOutput += `&passphrase=${encodeURIComponent(this.config.passPhrase.trim()).replace(/%20/g, '+')}`;
+    }
+    
+    // Generate MD5 hash
+    return crypto.createHash('md5').update(pfOutput).digest('hex');
+  }
+
+  getPaymentUrl(paymentData) {
+    return `${this.baseUrl}?${querystring.stringify(paymentData)}`;
+  }
+
+  async validatePayment(pfData) {
+    try {
+      // Check required parameters
+      const requiredParams = [
+        'm_payment_id', 'pf_payment_id', 'payment_status', 
+        'item_name', 'amount_gross', 'amount_fee', 
+        'amount_net', 'custom_str1'
+      ];
+      
+      for (const param of requiredParams) {
+        if (!pfData[param]) {
+          throw new Error(`Missing required parameter: ${param}`);
+        }
+      }
+      
+      // Verify signature
+      const localSignature = this.generateSignature(pfData);
+      if (localSignature !== pfData.signature) {
+        throw new Error('Invalid signature');
+      }
+      
+      // Verify payment status
+      if (pfData.payment_status !== 'COMPLETE') {
+        throw new Error(`Payment not complete: ${pfData.payment_status}`);
+      }
+      
+      // Optional: Validate with PayFast server
+      const validationResponse = await axios.post(this.config.validateUrl, pfData, {
+        headers: {
+          'Content-Type': 'application/x-www-form-urlencoded'
+        }
+      });
+      
+      if (validationResponse.data !== 'VALID') {
+        throw new Error('PayFast validation failed');
+      }
+      
+      // Parse custom data
+      let customData = {};
+      if (pfData.custom_str2) {
+        try {
+          customData = JSON.parse(pfData.custom_str2);
+        } catch (e) {
+          console.warn('Failed to parse custom data:', e);
+        }
+      }
+      
+      return {
+        success: true,
+        transactionId: pfData.pf_payment_id,
+        paymentId: pfData.m_payment_id,
+        applicantId: pfData.custom_str1,
+        amount: parseFloat(pfData.amount_gross),
+        fees: parseFloat(pfData.amount_fee),
+        netAmount: parseFloat(pfData.amount_net),
+        status: pfData.payment_status,
+        paymentMethod: pfData.payment_method,
+        customData: customData,
+        rawData: pfData
+      };
+      
+    } catch (error) {
+      console.error('PayFast validation error:', error);
+      return {
+        success: false,
+        error: error.message,
+        rawData: pfData
+      };
+    }
+  }
+
+  generatePaymentSuccessPage(transaction) {
+    return `
+      <!DOCTYPE html>
+      <html lang="en">
+      <head>
+        <meta charset="UTF-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <title>Payment Successful - JobAI South Africa</title>
+        <style>
+          body {
+            font-family: Arial, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 20px;
+          }
+          
+          .success-container {
+            background: white;
+            border-radius: 20px;
+            padding: 40px;
+            max-width: 500px;
+            text-align: center;
+            box-shadow: 0 20px 60px rgba(0,0,0,0.3);
+          }
+          
+          .success-icon {
+            color: #10B981;
+            font-size: 80px;
+            margin-bottom: 20px;
+          }
+          
+          .transaction-details {
+            background: #F9FAFB;
+            border-radius: 10px;
+            padding: 20px;
+            margin: 20px 0;
+            text-align: left;
+          }
+          
+          .detail-row {
+            display: flex;
+            justify-content: space-between;
+            margin-bottom: 10px;
+            padding-bottom: 10px;
+            border-bottom: 1px solid #E5E7EB;
+          }
+          
+          .detail-row:last-child {
+            border-bottom: none;
+            margin-bottom: 0;
+          }
+          
+          .btn {
+            background: #10B981;
+            color: white;
+            border: none;
+            padding: 15px 30px;
+            border-radius: 10px;
+            font-size: 16px;
+            cursor: pointer;
+            text-decoration: none;
+            display: inline-block;
+            margin-top: 20px;
+          }
+          
+          .btn:hover {
+            background: #059669;
+          }
+        </style>
+      </head>
+      <body>
+        <div class="success-container">
+          <div class="success-icon">✓</div>
+          <h1>Payment Successful!</h1>
+          <p>Your AI job application service has been activated.</p>
+          
+          <div class="transaction-details">
+            <div class="detail-row">
+              <span>Reference:</span>
+              <strong>${transaction.paymentId}</strong>
+            </div>
+            <div class="detail-row">
+              <span>Amount:</span>
+              <strong>R${transaction.amount.toFixed(2)}</strong>
+            </div>
+            <div class="detail-row">
+              <span>Status:</span>
+              <strong style="color: #10B981;">${transaction.status}</strong>
+            </div>
+            <div class="detail-row">
+              <span>Date:</span>
+              <strong>${new Date().toLocaleDateString('en-ZA')}</strong>
+            </div>
+          </div>
+          
+          <p>You will receive your enhanced CV within 24 hours.</p>
+          <p>Check your email and WhatsApp for confirmation.</p>
+          
+          <a href="/dashboard" class="btn">Go to Dashboard</a>
+        </div>
+      </body>
+      </html>
+    `;
+  }
+
+  async initiateSubscription(applicant, plan = 'monthly') {
+    const plans = {
+      monthly: {
+        amount: 500,
+        frequency: 3, // Monthly
+        cycles: 0 // 0 = indefinite
+      },
+      quarterly: {
+        amount: 1350, // 10% discount
+        frequency: 4, // Quarterly
+        cycles: 0
+      },
+      annual: {
+        amount: 4800, // 20% discount
+        frequency: 6, // Annually
+        cycles: 0
+      }
+    };
+    
+    const selectedPlan = plans[plan] || plans.monthly;
+    
+    const subscriptionData = {
+      merchant_id: this.config.merchantId,
+      merchant_key: this.config.merchantKey,
+      return_url: this.config.returnUrl,
+      cancel_url: this.config.cancelUrl,
+      notify_url: this.config.notifyUrl,
+      
+      name_first: applicant.personalInfo.firstName,
+      name_last: applicant.personalInfo.lastName,
+      email_address: applicant.personalInfo.email,
+      
+      m_payment_id: `SUB-${applicant.applicantId}-${Date.now()}`,
+      amount: selectedPlan.amount.toFixed(2),
+      item_name: `JobAI ${plan.charAt(0).toUpperCase() + plan.slice(1)} Subscription`,
+      item_description: `Recurring AI job application service - ${plan} plan`,
+      
+      subscription_type: 1, // 1 = subscription
+      frequency: selectedPlan.frequency,
+      cycles: selectedPlan.cycles,
+      
+      custom_str1: applicant.applicantId,
+      custom_str2: JSON.stringify({ plan: plan }),
+      
+      signature: null
+    };
+    
+    subscriptionData.signature = this.generateSignature(subscriptionData);
+    
+    return {
+      paymentUrl: this.getPaymentUrl(subscriptionData),
+      plan: plan,
+      amount: selectedPlan.amount,
+      frequency: this.getFrequencyName(selectedPlan.frequency)
+    };
+  }
+
+  getFrequencyName(frequency) {
+    const frequencies = {
+      3: 'Monthly',
+      4: 'Quarterly',
+      6: 'Annually'
+    };
+    return frequencies[frequency] || 'Monthly';
+  }
+
+  async handleITN(ipnData) {
+    // ITN = Instant Transaction Notification
+    try {
+      const validation = await this.validatePayment(ipnData);
+      
+      if (!validation.success) {
+        return {
+          processed: false,
+          error: validation.error
+        };
+      }
+      
+      // Update database
+      const PayFastTransaction = require('./PayFastModel');
+      
+      const transaction = await PayFastTransaction.findOneAndUpdate(
+        { paymentId: validation.paymentId },
+        {
+          status: 'completed',
+          validated: true,
+          validatedAt: new Date(),
+          amount: validation.amount,
+          fees: validation.fees,
+          netAmount: validation.netAmount,
+          paymentMethod: validation.paymentMethod,
+          rawResponse: validation.rawData
+        },
+        { new: true, upsert: true }
+      );
+      
+      // Activate applicant service
+      const Applicant = require('../../../backend/src/models/Applicant');
+      await Applicant.findOneAndUpdate(
+        { applicantId: validation.applicantId },
+        {
+          'payment.status': 'completed',
+          'payment.transactionId': validation.transactionId,
+          'payment.paymentMethod': 'payfast',
+          status: 'active',
+          'service.active': true,
+          'service.activatedAt': new Date(),
+          'service.expiresAt': new Date(Date.now() + 30 * 24 * 60 * 60 * 1000)
+        }
+      );
+      
+      return {
+        processed: true,
+        transactionId: validation.transactionId,
+        applicantId: validation.applicantId,
+        amount: validation.amount
+      };
+      
+    } catch (error) {
+      console.error('ITN handling error:', error);
+      return {
+        processed: false,
+        error: error.message
+      };
+    }
+  }
+}
+
+module.exports = PayFastService;
