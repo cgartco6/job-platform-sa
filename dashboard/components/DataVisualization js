@@ -1,0 +1,300 @@
+import React from 'react';
+import {
+  Box,
+  Card,
+  CardContent,
+  Grid,
+  Typography,
+  Select,
+  MenuItem,
+  FormControl,
+  InputLabel
+} from '@mui/material';
+import {
+  LineChart,
+  Line,
+  BarChart,
+  Bar,
+  PieChart,
+  Pie,
+  Cell,
+  XAxis,
+  YAxis,
+  CartesianGrid,
+  Tooltip,
+  Legend,
+  ResponsiveContainer
+} from 'recharts';
+
+const DataVisualization = ({ data, filters, onFilterChange }) => {
+  const provinces = [
+    'Gauteng', 'Western Cape', 'KwaZulu-Natal', 'Eastern Cape',
+    'Limpopo', 'Mpumalanga', 'North West', 'Free State', 'Northern Cape'
+  ];
+
+  const COLORS = ['#0088FE', '#00C49F', '#FFBB28', '#FF8042', '#8884D8', '#82CA9D'];
+
+  const RevenueChart = ({ data }) => (
+    <Card>
+      <CardContent>
+        <Typography variant="h6" gutterBottom>
+          Revenue Trend
+        </Typography>
+        <ResponsiveContainer width="100%" height={300}>
+          <LineChart data={data.revenueTrend}>
+            <CartesianGrid strokeDasharray="3 3" />
+            <XAxis dataKey="month" />
+            <YAxis />
+            <Tooltip formatter={(value) => [`R${value.toFixed(2)}`, 'Revenue']} />
+            <Legend />
+            <Line type="monotone" dataKey="revenue" stroke="#8884d8" />
+            <Line type="monotone" dataKey="target" stroke="#82ca9d" strokeDasharray="5 5" />
+          </LineChart>
+        </ResponsiveContainer>
+      </CardContent>
+    </Card>
+  );
+
+  const ProvinceDistribution = ({ data }) => (
+    <Card>
+      <CardContent>
+        <Box display="flex" justifyContent="space-between" alignItems="center" mb={2}>
+          <Typography variant="h6">
+            User Distribution by Province
+          </Typography>
+          <FormControl size="small" sx={{ minWidth: 120 }}>
+            <InputLabel>Metric</InputLabel>
+            <Select
+              value={filters.provinceMetric}
+              label="Metric"
+              onChange={(e) => onFilterChange('provinceMetric', e.target.value)}
+            >
+              <MenuItem value="users">Users</MenuItem>
+              <MenuItem value="revenue">Revenue</MenuItem>
+              <MenuItem value="applications">Applications</MenuItem>
+            </Select>
+          </FormControl>
+        </Box>
+        <ResponsiveContainer width="100%" height={300}>
+          <BarChart data={data.provinceDistribution}>
+            <CartesianGrid strokeDasharray="3 3" />
+            <XAxis dataKey="province" angle={-45} textAnchor="end" height={80} />
+            <YAxis />
+            <Tooltip formatter={(value) => [value, filters.provinceMetric]} />
+            <Legend />
+            <Bar dataKey="value" fill="#8884d8" />
+          </BarChart>
+        </ResponsiveContainer>
+      </CardContent>
+    </Card>
+  );
+
+  const CityAnalysis = ({ data }) => (
+    <Card>
+      <CardContent>
+        <Typography variant="h6" gutterBottom>
+          Top Cities Analysis
+        </Typography>
+        <Grid container spacing={2}>
+          {data.topCities.map((city, index) => (
+            <Grid item xs={12} sm={6} md={4} key={city.name}>
+              <Card variant="outlined">
+                <CardContent>
+                  <Typography variant="subtitle1" gutterBottom>
+                    {index + 1}. {city.name}
+                  </Typography>
+                  <Typography variant="body2" color="text.secondary">
+                    Province: {city.province}
+                  </Typography>
+                  <Typography variant="h6">
+                    {city.users.toLocaleString()} users
+                  </Typography>
+                  <Typography variant="body2">
+                    Revenue: R{city.revenue.toLocaleString()}
+                  </Typography>
+                  <Typography variant="body2">
+                    Growth: {city.growth}%
+                  </Typography>
+                </CardContent>
+              </Card>
+            </Grid>
+          ))}
+        </Grid>
+      </CardContent>
+    </Card>
+  );
+
+  const PaymentMethods = ({ data }) => (
+    <Card>
+      <CardContent>
+        <Typography variant="h6" gutterBottom>
+          Payment Method Distribution
+        </Typography>
+        <ResponsiveContainer width="100%" height={300}>
+          <PieChart>
+            <Pie
+              data={data.paymentMethods}
+              cx="50%"
+              cy="50%"
+              labelLine={false}
+              label={({ name, percent }) => `${name}: ${(percent * 100).toFixed(0)}%`}
+              outerRadius={80}
+              fill="#8884d8"
+              dataKey="value"
+            >
+              {data.paymentMethods.map((entry, index) => (
+                <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
+              ))}
+            </Pie>
+            <Tooltip formatter={(value) => [`R${value.toFixed(2)}`, 'Amount']} />
+          </PieChart>
+        </ResponsiveContainer>
+      </CardContent>
+    </Card>
+  );
+
+  const UserDemographics = ({ data }) => (
+    <Card>
+      <CardContent>
+        <Typography variant="h6" gutterBottom>
+          User Demographics
+        </Typography>
+        <Grid container spacing={3}>
+          <Grid item xs={12} md={6}>
+            <Typography variant="subtitle2" gutterBottom>
+              Age Distribution
+            </Typography>
+            <ResponsiveContainer width="100%" height={200}>
+              <BarChart data={data.ageDistribution}>
+                <XAxis dataKey="range" />
+                <YAxis />
+                <Tooltip />
+                <Bar dataKey="count" fill="#8884d8" />
+              </BarChart>
+            </ResponsiveContainer>
+          </Grid>
+          <Grid item xs={12} md={6}>
+            <Typography variant="subtitle2" gutterBottom>
+              Employment Status
+            </Typography>
+            <ResponsiveContainer width="100%" height={200}>
+              <PieChart>
+                <Pie
+                  data={data.employmentStatus}
+                  cx="50%"
+                  cy="50%"
+                  innerRadius={60}
+                  outerRadius={80}
+                  paddingAngle={5}
+                  dataKey="value"
+                >
+                  {data.employmentStatus.map((entry, index) => (
+                    <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
+                  ))}
+                </Pie>
+                <Tooltip />
+              </PieChart>
+            </ResponsiveContainer>
+          </Grid>
+        </Grid>
+      </CardContent>
+    </Card>
+  );
+
+  const KPIOverview = ({ data }) => (
+    <Grid container spacing={3} sx={{ mb: 3 }}>
+      <Grid item xs={12} sm={6} md={3}>
+        <Card>
+          <CardContent>
+            <Typography color="textSecondary" gutterBottom>
+              Total Revenue
+            </Typography>
+            <Typography variant="h4">
+              R{data.totalRevenue.toLocaleString()}
+            </Typography>
+            <Typography variant="body2" color={data.revenueGrowth >= 0 ? 'success.main' : 'error.main'}>
+              {data.revenueGrowth >= 0 ? '↑' : '↓'} {Math.abs(data.revenueGrowth)}% from last month
+            </Typography>
+          </CardContent>
+        </Card>
+      </Grid>
+      
+      <Grid item xs={12} sm={6} md={3}>
+        <Card>
+          <CardContent>
+            <Typography color="textSecondary" gutterBottom>
+              Active Users
+            </Typography>
+            <Typography variant="h4">
+              {data.activeUsers.toLocaleString()}
+            </Typography>
+            <Typography variant="body2">
+              {data.newUsersToday} new today
+            </Typography>
+          </CardContent>
+        </Card>
+      </Grid>
+      
+      <Grid item xs={12} sm={6} md={3}>
+        <Card>
+          <CardContent>
+            <Typography color="textSecondary" gutterBottom>
+              Applications Submitted
+            </Typography>
+            <Typography variant="h4">
+              {data.applicationsSubmitted.toLocaleString()}
+            </Typography>
+            <Typography variant="body2">
+              {data.successRate}% success rate
+            </Typography>
+          </CardContent>
+        </Card>
+      </Grid>
+      
+      <Grid item xs={12} sm={6} md={3}>
+        <Card>
+          <CardContent>
+            <Typography color="textSecondary" gutterBottom>
+              Average Revenue Per User
+            </Typography>
+            <Typography variant="h4">
+              R{data.arpu.toFixed(2)}
+            </Typography>
+            <Typography variant="body2">
+              Target: R{data.arpuTarget}
+            </Typography>
+          </CardContent>
+        </Card>
+      </Grid>
+    </Grid>
+  );
+
+  return (
+    <Box>
+      <KPIOverview data={data.kpis} />
+      
+      <Grid container spacing={3}>
+        <Grid item xs={12} md={8}>
+          <RevenueChart data={data.charts} />
+        </Grid>
+        <Grid item xs={12} md={4}>
+          <PaymentMethods data={data.charts} />
+        </Grid>
+        
+        <Grid item xs={12}>
+          <ProvinceDistribution data={data.charts} />
+        </Grid>
+        
+        <Grid item xs={12}>
+          <CityAnalysis data={data.charts} />
+        </Grid>
+        
+        <Grid item xs={12}>
+          <UserDemographics data={data.charts} />
+        </Grid>
+      </Grid>
+    </Box>
+  );
+};
+
+export default DataVisualization;
